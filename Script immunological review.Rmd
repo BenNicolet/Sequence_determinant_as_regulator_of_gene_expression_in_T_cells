@@ -18,8 +18,8 @@ knitr::opts_knit$set("~/")
 
 ```{r importing, formatting 3UTR sequence}
 
-## The human 3'UTR sequence (hg38) was downloaded from Ensembl Biomart release 104 on June 22nd 2021. ##
-## Note: only protein coding mRNA isoforms are considered here. ##
+## The 3'UTR sequence of human protein coding genes (hg38) was downloaded from Ensembl Biomart release 104 on June 22nd 2021. ##
+## Note: only protein-coding genes are considered here. ##
 
 
 ## Here we re-format the fasta format to table format ##
