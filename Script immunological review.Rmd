@@ -1,0 +1,477 @@
+---
+title: "Sequence determinants as key regulators in gene expression of T cells "
+author: "Ben Nicolet"
+date: "03-08-2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(plyr)
+library(dplyr)
+library(ggplot2)
+
+knitr::opts_knit$set("~/")
+```
+
+
+```{r importing, formatting 3UTR sequence}
+
+## The human 3'UTR sequence (hg38) was downloaded from Ensembl Biomart release 104 on June 22nd 2021. ##
+## Note: only protein coding mRNA isoforms are considered here. ##
+
+
+## Here we re-format the fasta format to table format ##
+UTR3_fasta <- readtext::readtext("./3UTR_biomart_per_gene_ens104.txt")
+#glimpse(UTR3_fasta)
+UTR3_fasta <- gsub("\\\n","",UTR3_fasta) # removing the "\n" new line signs
+UTR3_fasta <- gsub(">","\\\n>",UTR3_fasta) ## replace > by \n> to insert new line signs only at the start of entries
+UTR3_fasta <- gsub("","\t",UTR3_fasta) ## making columns (using the tab (\t) sign)
+
+write(UTR3_fasta,"./3UTR_biomart_per_gene_ens104_nobreaks.txt") # saving
+
+UTR3_fasta <- read.delim("./3UTR_biomart_per_gene_ens104_nobreaks.txt",header = F) # re-import
+
+UTR3_fasta$ID <- UTR3_fasta$V1 # making ID columns
+## removing the sequence from the ID ##
+UTR3_fasta$ID <- gsub("A","",UTR3_fasta$ID) 
+UTR3_fasta$ID <- gsub("T","",UTR3_fasta$ID)
+UTR3_fasta$ID <- gsub("G","",UTR3_fasta$ID)
+UTR3_fasta$ID <- gsub("C","",UTR3_fasta$ID)
+UTR3_fasta$ID <- gsub(">","",UTR3_fasta$ID)
+
+UTR3_fasta$ID <- gsub("ENS","ENSG",UTR3_fasta$ID) # fixing gene ID
+UTR3_fasta <- UTR3_fasta[2:1] # re-ordering columns
+
+UTR3_fasta$V1 <- gsub(">ENSG...........","",UTR3_fasta$V1) # removing the gene ID from the sequence
+colnames(UTR3_fasta)[2] <- "sequence" # renaming the sequence column
+
+
+
+```
+
+```{r 3UTR length calculation}
+
+## 3'UTR length calculation ##
+UTR3_fasta$UTR3_length <- mapply(strsplit(as.character(UTR3_fasta$sequence),","),FUN=function(x){nchar(x)})
+
+median(UTR3_fasta$UTR3_length) # Median 3'UTR length: 673 nt
+mean(UTR3_fasta$UTR3_length) # Mean 3'UTR length: 1320.695 nt
+
+
+```
+
+## Counting ATTTA 's
+```{r Counting ATTTAs}
+
+## AREs (ATTTA) can be found separately or in clusters. R doesnt calculate properly juxtaposed clusters.##
+## We wrote the functions below to remedy to this problem for up to 10 meres ## 
+
+UTR3_fasta$ARE_1xATTTA_count <- str_count(UTR3_fasta$sequence,pattern ="ATTTA")
+UTR3_fasta$ARE_2_count <- str_count(UTR3_fasta$sequence, "ATTTATTTA")
+UTR3_fasta$ARE_3_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTA")
+UTR3_fasta$ARE_4_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTA")
+UTR3_fasta$ARE_5_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTA")
+UTR3_fasta$ARE_6_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTATTTA")
+UTR3_fasta$ARE_7_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTATTTATTTA")
+UTR3_fasta$ARE_8_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTATTTATTTATTTA")
+UTR3_fasta$ARE_9_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTATTTATTTATTTATTTA")
+UTR3_fasta$ARE_10_count <- str_count(UTR3_fasta$sequence, "ATTTATTTATTTATTTATTTATTTATTTATTTATTTATTTA")
+
+
+## Correcting for double counting ##
+
+UTR3_fasta$ARE_9_count <- UTR3_fasta$ARE_9_count- 
+  (UTR3_fasta$ARE_10_count*1)
+
+UTR3_fasta$ARE_8_count <- UTR3_fasta$ARE_8_count- 
+  ((UTR3_fasta$ARE_10_count*1)+
+  (UTR3_fasta$ARE_9_count*1))
+
+UTR3_fasta$ARE_7_count <- UTR3_fasta$ARE_7_count- 
+  ((UTR3_fasta$ARE_10_count*1)+
+  (UTR3_fasta$ARE_9_count*1)+
+  (UTR3_fasta$ARE_8_count*1))
+
+UTR3_fasta$ARE_6_count <- UTR3_fasta$ARE_6_count- 
+  ((UTR3_fasta$ARE_10_count*1)+
+  (UTR3_fasta$ARE_9_count*1)+
+  (UTR3_fasta$ARE_8_count*1)+
+  (UTR3_fasta$ARE_7_count*1))
+
+UTR3_fasta$ARE_5_count <- UTR3_fasta$ARE_5_count- 
+  ((UTR3_fasta$ARE_10_count*1)+
+  (UTR3_fasta$ARE_9_count*1)+
+  (UTR3_fasta$ARE_8_count*1)+
+  (UTR3_fasta$ARE_7_count*1)+
+  (UTR3_fasta$ARE_6_count*1))
+
+UTR3_fasta$ARE_4_count <- UTR3_fasta$ARE_4_count- 
+  ((UTR3_fasta$ARE_10_count*2)+
+  (UTR3_fasta$ARE_9_count*2)+
+  (UTR3_fasta$ARE_8_count*1)+
+  (UTR3_fasta$ARE_7_count*1)+
+  (UTR3_fasta$ARE_6_count*1)+
+  (UTR3_fasta$ARE_5_count*1))
+
+UTR3_fasta$ARE_3_count <- UTR3_fasta$ARE_3_count- 
+  ((UTR3_fasta$ARE_10_count*2)+
+  (UTR3_fasta$ARE_9_count*2)+
+  (UTR3_fasta$ARE_8_count*2)+
+  (UTR3_fasta$ARE_7_count*2)+
+  (UTR3_fasta$ARE_6_count*1)+
+  (UTR3_fasta$ARE_5_count*1)+
+  (UTR3_fasta$ARE_4_count*1))
+
+
+UTR3_fasta$ARE_2_count <- UTR3_fasta$ARE_2_count- 
+  ((UTR3_fasta$ARE_10_count*3)+
+  (UTR3_fasta$ARE_9_count*3)+
+  (UTR3_fasta$ARE_8_count*3)+
+  (UTR3_fasta$ARE_7_count*2)+
+  (UTR3_fasta$ARE_6_count*2)+
+  (UTR3_fasta$ARE_5_count*2)+
+  (UTR3_fasta$ARE_4_count*1)+
+  (UTR3_fasta$ARE_3_count*1))
+
+UTR3_fasta$ARE_1xATTTA_count <- UTR3_fasta$ARE_1xATTTA_count- 
+  ((UTR3_fasta$ARE_10_count*5)+
+  (UTR3_fasta$ARE_9_count*5)+
+  (UTR3_fasta$ARE_8_count*4)+
+  (UTR3_fasta$ARE_7_count*4)+
+  (UTR3_fasta$ARE_6_count*3)+
+  (UTR3_fasta$ARE_5_count*3)+
+  (UTR3_fasta$ARE_4_count*2)+
+  (UTR3_fasta$ARE_3_count*2)+
+  (UTR3_fasta$ARE_2_count*1))
+
+
+
+## Now counting the counts:
+
+UTR3_fasta$ARE_full_count <-
+  (UTR3_fasta$ARE_10_count*10)+
+  (UTR3_fasta$ARE_9_count*9)+
+  (UTR3_fasta$ARE_8_count*8)+
+  (UTR3_fasta$ARE_7_count*7)+
+  (UTR3_fasta$ARE_6_count*6)+
+  (UTR3_fasta$ARE_5_count*5)+
+  (UTR3_fasta$ARE_4_count*4)+
+  (UTR3_fasta$ARE_3_count*3)+
+  (UTR3_fasta$ARE_2_count*2)+
+  UTR3_fasta$ARE_1xATTTA_count
+
+
+
+dim(UTR3_fasta) # 37,364
+dim(UTR3_fasta[UTR3_fasta$ARE_full_count>0,]) # 21,851 sequences with at least 1 "ATTTA" ARE(s) 
+
+## Removing un-used columns ##
+
+UTR3_fasta$ARE_10_count <- NULL
+UTR3_fasta$ARE_9_count <- NULL
+UTR3_fasta$ARE_8_count <- NULL
+UTR3_fasta$ARE_7_count <- NULL
+UTR3_fasta$ARE_6_count <- NULL
+UTR3_fasta$ARE_5_count <- NULL
+UTR3_fasta$ARE_4_count <- NULL
+UTR3_fasta$ARE_3_count <- NULL
+UTR3_fasta$ARE_2_count <- NULL
+UTR3_fasta$ARE_1xATTTA_count <- NULL
+
+```
+
+
+
+```{r 3UTR length and ATTTA counts}
+
+## Here we plot the 3'UTR length against the ATTTA occurrence ##
+
+ggplot(UTR3_fasta,aes(y=UTR3_length,x=ARE_full_count))+
+  geom_point(alpha=0.1,stroke=0,size=2)+
+  geom_smooth(method = "lm")+
+  theme_minimal()+
+  xlab("ATTTA counts per 3'UTR")+
+  ylab("3'UTR length")+
+  ggtitle(label = "Length of 3'UTR and ATTTA occurrence",subtitle = "homo sapiens")+
+  theme(aspect.ratio = 1)
+
+
+```
+
+
+## Counting GTTTG 's
+```{r Counting GTTTGs}
+
+## Similar analysis than the chunk of ATTTA occurrences but for GTTTG ##
+
+UTR3_fasta$GTTTG_1xGTTTG_count <- str_count(UTR3_fasta$sequence,pattern ="GTTTG")
+UTR3_fasta$GTTTG_2_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTG")
+UTR3_fasta$GTTTG_3_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_4_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_5_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_6_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_7_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_8_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_9_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTG")
+UTR3_fasta$GTTTG_10_count <- str_count(UTR3_fasta$sequence, "GTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTGTTTG")
+
+
+## Correcting for double counting ##
+
+UTR3_fasta$GTTTG_9_count <- UTR3_fasta$GTTTG_9_count- 
+  (UTR3_fasta$GTTTG_10_count*1)
+
+UTR3_fasta$GTTTG_8_count <- UTR3_fasta$GTTTG_8_count- 
+  ((UTR3_fasta$GTTTG_10_count*1)+
+  (UTR3_fasta$GTTTG_9_count*1))
+
+UTR3_fasta$GTTTG_7_count <- UTR3_fasta$GTTTG_7_count- 
+  ((UTR3_fasta$GTTTG_10_count*1)+
+  (UTR3_fasta$GTTTG_9_count*1)+
+  (UTR3_fasta$GTTTG_8_count*1))
+
+UTR3_fasta$GTTTG_6_count <- UTR3_fasta$GTTTG_6_count- 
+  ((UTR3_fasta$GTTTG_10_count*1)+
+  (UTR3_fasta$GTTTG_9_count*1)+
+  (UTR3_fasta$GTTTG_8_count*1)+
+  (UTR3_fasta$GTTTG_7_count*1))
+
+UTR3_fasta$GTTTG_5_count <- UTR3_fasta$GTTTG_5_count- 
+  ((UTR3_fasta$GTTTG_10_count*1)+
+  (UTR3_fasta$GTTTG_9_count*1)+
+  (UTR3_fasta$GTTTG_8_count*1)+
+  (UTR3_fasta$GTTTG_7_count*1)+
+  (UTR3_fasta$GTTTG_6_count*1))
+
+UTR3_fasta$GTTTG_4_count <- UTR3_fasta$GTTTG_4_count- 
+  ((UTR3_fasta$GTTTG_10_count*2)+
+  (UTR3_fasta$GTTTG_9_count*2)+
+  (UTR3_fasta$GTTTG_8_count*1)+
+  (UTR3_fasta$GTTTG_7_count*1)+
+  (UTR3_fasta$GTTTG_6_count*1)+
+  (UTR3_fasta$GTTTG_5_count*1))
+
+UTR3_fasta$GTTTG_3_count <- UTR3_fasta$GTTTG_3_count- 
+  ((UTR3_fasta$GTTTG_10_count*2)+
+  (UTR3_fasta$GTTTG_9_count*2)+
+  (UTR3_fasta$GTTTG_8_count*2)+
+  (UTR3_fasta$GTTTG_7_count*2)+
+  (UTR3_fasta$GTTTG_6_count*1)+
+  (UTR3_fasta$GTTTG_5_count*1)+
+  (UTR3_fasta$GTTTG_4_count*1))
+
+
+UTR3_fasta$GTTTG_2_count <- UTR3_fasta$GTTTG_2_count- 
+  ((UTR3_fasta$GTTTG_10_count*3)+
+  (UTR3_fasta$GTTTG_9_count*3)+
+  (UTR3_fasta$GTTTG_8_count*3)+
+  (UTR3_fasta$GTTTG_7_count*2)+
+  (UTR3_fasta$GTTTG_6_count*2)+
+  (UTR3_fasta$GTTTG_5_count*2)+
+  (UTR3_fasta$GTTTG_4_count*1)+
+  (UTR3_fasta$GTTTG_3_count*1))
+
+UTR3_fasta$GTTTG_1xGTTTG_count <- UTR3_fasta$GTTTG_1xGTTTG_count- 
+  ((UTR3_fasta$GTTTG_10_count*5)+
+  (UTR3_fasta$GTTTG_9_count*5)+
+  (UTR3_fasta$GTTTG_8_count*4)+
+  (UTR3_fasta$GTTTG_7_count*4)+
+  (UTR3_fasta$GTTTG_6_count*3)+
+  (UTR3_fasta$GTTTG_5_count*3)+
+  (UTR3_fasta$GTTTG_4_count*2)+
+  (UTR3_fasta$GTTTG_3_count*2)+
+  (UTR3_fasta$GTTTG_2_count*1))
+
+
+
+## Now counting the counts:
+
+UTR3_fasta$GTTTG_full_count <-
+  (UTR3_fasta$GTTTG_10_count*10)+
+  (UTR3_fasta$GTTTG_9_count*9)+
+  (UTR3_fasta$GTTTG_8_count*8)+
+  (UTR3_fasta$GTTTG_7_count*7)+
+  (UTR3_fasta$GTTTG_6_count*6)+
+  (UTR3_fasta$GTTTG_5_count*5)+
+  (UTR3_fasta$GTTTG_4_count*4)+
+  (UTR3_fasta$GTTTG_3_count*3)+
+  (UTR3_fasta$GTTTG_2_count*2)+
+  UTR3_fasta$GTTTG_1xGTTTG_count
+
+dim(UTR3_fasta[UTR3_fasta$GTTTG_full_count>0,]) # 20,356 sequences with at least 1 "GTTTG" GTTTG(s) 
+
+
+## Removing un-used columns ##
+
+UTR3_fasta$GTTTG_10_count <- NULL
+UTR3_fasta$GTTTG_9_count <- NULL
+UTR3_fasta$GTTTG_8_count <- NULL
+UTR3_fasta$GTTTG_7_count <- NULL
+UTR3_fasta$GTTTG_6_count <- NULL
+UTR3_fasta$GTTTG_5_count <- NULL
+UTR3_fasta$GTTTG_4_count <- NULL
+UTR3_fasta$GTTTG_3_count <- NULL
+UTR3_fasta$GTTTG_2_count <- NULL
+UTR3_fasta$GTTTG_1xGTTTG_count <- NULL
+
+```
+
+
+
+```{r 3UTR length and GTTTG counts}
+
+## Here we plot the 3'UTR length against the GTTTG occurrence ##
+
+ggplot(UTR3_fasta,aes(y=UTR3_length,x=GTTTG_full_count))+
+  geom_point(alpha=0.2,stroke=0,size=2)+
+  geom_smooth(method = "lm")+
+  theme_minimal()+
+  xlab("GTTTG counts per 3'UTR")+
+  ylab("3'UTR length")+
+  scale_x_continuous(limits = c(0,120))+
+  ggtitle(label = "Length of 3'UTR and GTTTG occurrence",subtitle = "homo sapiens")+
+  theme(aspect.ratio = 1)
+
+```
+
+
+
+## Counting CTTTC 's
+```{r Counting CTTTCs}
+
+## Similar analysis than the chunk of ATTTA occurrences but for CTTTC ##
+
+UTR3_fasta$CTTTC_1xCTTTC_count <- str_count(UTR3_fasta$sequence,pattern ="CTTTC")
+UTR3_fasta$CTTTC_2_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTC")
+UTR3_fasta$CTTTC_3_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_4_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_5_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_6_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_7_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_8_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_9_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTC")
+UTR3_fasta$CTTTC_10_count <- str_count(UTR3_fasta$sequence, "CTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTC")
+
+
+## Correcting for double counting : 
+
+UTR3_fasta$CTTTC_9_count <- UTR3_fasta$CTTTC_9_count- 
+  (UTR3_fasta$CTTTC_10_count*1)
+
+UTR3_fasta$CTTTC_8_count <- UTR3_fasta$CTTTC_8_count- 
+  ((UTR3_fasta$CTTTC_10_count*1)+
+  (UTR3_fasta$CTTTC_9_count*1))
+
+UTR3_fasta$CTTTC_7_count <- UTR3_fasta$CTTTC_7_count- 
+  ((UTR3_fasta$CTTTC_10_count*1)+
+  (UTR3_fasta$CTTTC_9_count*1)+
+  (UTR3_fasta$CTTTC_8_count*1))
+
+UTR3_fasta$CTTTC_6_count <- UTR3_fasta$CTTTC_6_count- 
+  ((UTR3_fasta$CTTTC_10_count*1)+
+  (UTR3_fasta$CTTTC_9_count*1)+
+  (UTR3_fasta$CTTTC_8_count*1)+
+  (UTR3_fasta$CTTTC_7_count*1))
+
+UTR3_fasta$CTTTC_5_count <- UTR3_fasta$CTTTC_5_count- 
+  ((UTR3_fasta$CTTTC_10_count*1)+
+  (UTR3_fasta$CTTTC_9_count*1)+
+  (UTR3_fasta$CTTTC_8_count*1)+
+  (UTR3_fasta$CTTTC_7_count*1)+
+  (UTR3_fasta$CTTTC_6_count*1))
+
+UTR3_fasta$CTTTC_4_count <- UTR3_fasta$CTTTC_4_count- 
+  ((UTR3_fasta$CTTTC_10_count*2)+
+  (UTR3_fasta$CTTTC_9_count*2)+
+  (UTR3_fasta$CTTTC_8_count*1)+
+  (UTR3_fasta$CTTTC_7_count*1)+
+  (UTR3_fasta$CTTTC_6_count*1)+
+  (UTR3_fasta$CTTTC_5_count*1))
+
+UTR3_fasta$CTTTC_3_count <- UTR3_fasta$CTTTC_3_count- 
+  ((UTR3_fasta$CTTTC_10_count*2)+
+  (UTR3_fasta$CTTTC_9_count*2)+
+  (UTR3_fasta$CTTTC_8_count*2)+
+  (UTR3_fasta$CTTTC_7_count*2)+
+  (UTR3_fasta$CTTTC_6_count*1)+
+  (UTR3_fasta$CTTTC_5_count*1)+
+  (UTR3_fasta$CTTTC_4_count*1))
+
+
+UTR3_fasta$CTTTC_2_count <- UTR3_fasta$CTTTC_2_count- 
+  ((UTR3_fasta$CTTTC_10_count*3)+
+  (UTR3_fasta$CTTTC_9_count*3)+
+  (UTR3_fasta$CTTTC_8_count*3)+
+  (UTR3_fasta$CTTTC_7_count*2)+
+  (UTR3_fasta$CTTTC_6_count*2)+
+  (UTR3_fasta$CTTTC_5_count*2)+
+  (UTR3_fasta$CTTTC_4_count*1)+
+  (UTR3_fasta$CTTTC_3_count*1))
+
+UTR3_fasta$CTTTC_1xCTTTC_count <- UTR3_fasta$CTTTC_1xCTTTC_count- 
+  ((UTR3_fasta$CTTTC_10_count*5)+
+  (UTR3_fasta$CTTTC_9_count*5)+
+  (UTR3_fasta$CTTTC_8_count*4)+
+  (UTR3_fasta$CTTTC_7_count*4)+
+  (UTR3_fasta$CTTTC_6_count*3)+
+  (UTR3_fasta$CTTTC_5_count*3)+
+  (UTR3_fasta$CTTTC_4_count*2)+
+  (UTR3_fasta$CTTTC_3_count*2)+
+  (UTR3_fasta$CTTTC_2_count*1))
+
+
+
+## Now counting the counts ##
+
+UTR3_fasta$CTTTC_full_count <-
+  (UTR3_fasta$CTTTC_10_count*10)+
+  (UTR3_fasta$CTTTC_9_count*9)+
+  (UTR3_fasta$CTTTC_8_count*8)+
+  (UTR3_fasta$CTTTC_7_count*7)+
+  (UTR3_fasta$CTTTC_6_count*6)+
+  (UTR3_fasta$CTTTC_5_count*5)+
+  (UTR3_fasta$CTTTC_4_count*4)+
+  (UTR3_fasta$CTTTC_3_count*3)+
+  (UTR3_fasta$CTTTC_2_count*2)+
+  UTR3_fasta$CTTTC_1xCTTTC_count
+
+dim(UTR3_fasta[UTR3_fasta$CTTTC_full_count>0,]) # 22,330 sequences with at least 1 "CTTTC" CTTTC(s) 
+
+## Removing un-used columns ##
+
+UTR3_fasta$CTTTC_10_count <- NULL
+UTR3_fasta$CTTTC_9_count <- NULL
+UTR3_fasta$CTTTC_8_count <- NULL
+UTR3_fasta$CTTTC_7_count <- NULL
+UTR3_fasta$CTTTC_6_count <- NULL
+UTR3_fasta$CTTTC_5_count <- NULL
+UTR3_fasta$CTTTC_4_count <- NULL
+UTR3_fasta$CTTTC_3_count <- NULL
+UTR3_fasta$CTTTC_2_count <- NULL
+UTR3_fasta$CTTTC_1xCTTTC_count <- NULL
+
+
+```
+
+
+
+```{r 3UTR length and CTTTC counts}
+
+## Here we plot the 3'UTR length against the CTTTC occurrence ##
+
+ggplot(UTR3_fasta,aes(y=UTR3_length,x=CTTTC_full_count))+
+  geom_point(alpha=0.2,stroke=0,size=2)+
+  geom_smooth(method = "lm")+
+  theme_minimal()+
+  xlab("CTTTC counts per 3'UTR")+
+  ylab("3'UTR length")+
+  scale_x_continuous(limits = c(0,120))+
+  ggtitle(label = "Length of 3'UTR and CTTTC occurrence",subtitle = "homo sapiens")+
+  theme(aspect.ratio = 1)
+
+
+
+```
+
